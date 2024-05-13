@@ -1,0 +1,16 @@
+[tool.poetry]
+name = "realtime streaming project"
+version = "0.1.0"
+description = "A hands on to try Apache Kafka and Realtime Streaming"
+authors = ["Nikhil <nikhilgyanchandani10@gmail.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.9"
+kafka-python = "^2.0.2"
+requests = "^2.31.0"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
