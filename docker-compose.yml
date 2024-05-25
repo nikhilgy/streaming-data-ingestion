@@ -95,8 +95,9 @@ services:
         max-size: 10m
         max-file: "3"
     volumes:
-      - ./dags:/opt/airflow/dags
-      - ./scripts/entrypoint.sh:/opt/airflow/script/entrypoint.sh
+      - .\dags:/opt/airflow/dags
+      - .\scripts\entrypoint.sh:/opt/airflow/script/entrypoint.sh
+    
     ports:
       - "8080:8080"
     healthcheck:
@@ -136,6 +137,37 @@ services:
     networks:
       - confluent
   
+  spark-master:
+    image: docker.io/bitnami/spark:3.5
+    command: bin/spark-class org.apache.spark.deploy.master.Master
+    ports:
+      - "9090:8080"
+      - "7077:7077"
+    
+    environment:
+      - SPARK_LOCAL_IP=spark-master
+      - SPARK_WORKLOAD=master
+    networks:
+      - confluent
 
+  spark-worker-a:
+    image: docker.io/bitnami/spark:3.5
+    command: bin/spark-class org.apache.spark.deploy.worker.Worker
+    ports:
+      - "9091:8080"
+      - "7000:7000"
+    depends_on:
+      - spark-master
+    environment:
+      - SPARK_MASTER=spark://spark-master:7077
+      - SPARK_WORKER_CORES=1
+      - SPARK_WORKER_MEMORY=1G
+      - SPARK_DRIVER_MEMORY=1G
+      - SPARK_EXECUTOR_MEMORY=1G
+      - SPARK_WORKLOAD=worker
+      - SPARK_LOCAL_IP=spark-worker-a
+
+    networks:
+      - confluent
 networks:
   confluent: {}
