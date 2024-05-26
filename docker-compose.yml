@@ -169,5 +169,20 @@ services:
 
     networks:
       - confluent
+
+  cassandra:
+    image: cassandra:latest
+    container_name: cassandra-container
+    hostname: cassandra
+    ports:
+      - "9042:9042"
+    environment:
+      - CASSANDRA_USER=admin
+      - CASSANDRA_PASSWORD=admin
+      - MAX_HEAP_SIZE=512M
+      - HEAP_NEWSIZE=100M
+    networks:
+      - confluent
+
 networks:
   confluent: {}
