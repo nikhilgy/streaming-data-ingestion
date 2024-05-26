@@ -2,6 +2,9 @@ import logging
 
 from cassandra.cluster import Cluster, Session
 from cassandra.auth import PlainTextAuthProvider
+from pyspark.sql import SparkSession
+from pyspark.sql.types import StringType, StructField, StructType, ArrayType, LongType
+from pyspark.sql.functions import from_json
 
 logging.basicConfig(
     filename='streaming.log',  
@@ -97,11 +100,82 @@ def create_table(session: Session, keyspace='profiles'):
     except Exception as e:
         logging.error(f"Error creating table 'users': {e}")
 
+def spark_connection():
+    """
+    Establishes a connection to Apache Spark.
 
+    Returns:
+        pyspark.sql.SparkSession or None: A SparkSession object if the connection is successful,
+            None if there's an error.
+    """
+    try:
+        spark_conn = (
+            SparkSession
+            .builder
+            .appName("Streaming from Kafka")
+            .master("local[*]")
+            .config("spark.streaming.stopGracefullyOnShutdown", True)
+            .config("spark.sql.shuffle.partitions", 4)
+            .config("spark.cassandra.connection.host", "localhost")
+            .config(
+                "spark.jars.packages",
+                "com.datastax.spark:spark-cassandra-connector_2.13:3.4.1,"
+                "org.apache.spark:spark-sql-kafka-0-10_2.12:3.4.1"
+            )
+            .getOrCreate()
+        )
+        
+        logging.info("Spark session created successfully")    
+        return spark_conn
+    
+    except Exception as e:
+        logging.error(f"Error connecting to Spark: {e}")
+        return None
+    
+    
+def read_kafka_topic(spark_conn):
+    """
+    Reads data from a Kafka topic using Spark structured streaming.
+
+    Args:
+        spark_conn (pyspark.sql.SparkSession): The SparkSession object.
+
+    Returns:
+        pyspark.sql.DataFrame: A DataFrame representing the streaming data from the Kafka topic,
+            or None if there's an error.
+    """
+    try:
+        streaming_df = spark_conn.readStream \
+            .format("kafka") \
+            .option("kafka.bootstrap.servers", "localhost:9092") \
+            .option("subscribe", "users_queue") \
+            .option("startingOffsets", "earliest") \
+            .load()
+            
+        json_schema = StructType([
+            StructField('full_name', StringType(), True), \
+            StructField('gender', StringType(), True), \
+            StructField('address', StringType(), True), \
+            StructField('postcode', LongType(), True), \
+            StructField('email', StringType(), True), \
+            StructField('phone', StringType(), True)
+        ])    
+
+        # Parse value from binary to string
+        json_df = streaming_df.selectExpr("cast(value as string) as value")
+
+        json_expanded_df = json_df.withColumn("value", from_json(json_df["value"], json_schema)).select("value.*") 
+        
+        return json_expanded_df
+    
+    except Exception as e:
+        logging.error(f"Error reading from Kafka topic: {e}")
+        return None
+    
 if __name__ == "__main__":
     
     cassandra_conn = cassandra_connection()
-    
+    spark_conn = spark_connection()
     if cassandra_conn:
         """Create keyspace"""
         create_keyspace(cassandra_conn, keyspace_name='profiles')
@@ -109,6 +183,17 @@ if __name__ == "__main__":
         """Create table"""
         create_table(cassandra_conn, keyspace='profiles')
         
+        """Get data from Kafka"""
+        data_df = read_kafka_topic(spark_conn)
+        
+        """Write stream to cassandra"""
+        streaming_query = (data_df.writeStream.format("org.apache.spark.sql.cassandra")
+                           .option('checkPointLocation', '/tmp/checkpoint')
+                           .option('keyspace', 'profiles')
+                           .option('table', 'users')
+                           .start())
+        
+        streaming_query.awaitTermination()        
         """Shutdown cluster connection"""
         cassandra_conn.cluster.shutdown()
     

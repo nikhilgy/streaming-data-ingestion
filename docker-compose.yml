@@ -104,7 +104,7 @@ services:
       test: ['CMD-SHELL',"[ -f /opt/airflow/airflow-webserver.pid ]"]
       interval: 30s
       timeout: 10s
-      retries: 5
+      retries: 10
     networks:
       - confluent
       
@@ -131,14 +131,14 @@ services:
       EXECUTOR: Sequential
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
     volumes:
-      - ./dags:/opt/airflow/dags
-      - ./requirements.txt:/opt/airflow/requirements.txt
+      - .\dags:/opt/airflow/dags
+      - .\requirements.txt:/opt/airflow/requirements.txt
     command: bash -c "pip install -r ./requirements.txt && airflow db upgrade && airflow scheduler"
     networks:
       - confluent
   
   spark-master:
-    image: docker.io/bitnami/spark:3.5
+    image: bitnami/spark:latest
     command: bin/spark-class org.apache.spark.deploy.master.Master
     ports:
       - "9090:8080"
@@ -151,15 +151,15 @@ services:
       - confluent
 
   spark-worker-a:
-    image: docker.io/bitnami/spark:3.5
-    command: bin/spark-class org.apache.spark.deploy.worker.Worker
+    image: bitnami/spark:latest
+    command: bin/spark-class org.apache.spark.deploy.worker.Worker spark://spark-master:7077
     ports:
       - "9091:8080"
       - "7000:7000"
     depends_on:
       - spark-master
     environment:
-      - SPARK_MASTER=spark://spark-master:7077
+      - SPARK_MASTER_URL=spark://spark-master:7077
       - SPARK_WORKER_CORES=1
       - SPARK_WORKER_MEMORY=1G
       - SPARK_DRIVER_MEMORY=1G
