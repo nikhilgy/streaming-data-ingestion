@@ -63,14 +63,6 @@ with DAG(
         task_id="load_user_data_from_api",
         python_callable=stream_data
     )
-        
-
-# def run():
-#     user_data = get_data()
-    
-#     stream_data(user_data)
     
     
-# if __name__ == "__main__":
-    
-#     run()
+    streaming_task
