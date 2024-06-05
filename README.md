@@ -9,13 +9,14 @@ Developed a data pipeline using Apache Airflow, Kafka, Spark Streaming, and Cass
 
 
 ### Architecture
+<img width="657" alt="architecture" src="https://github.com/nikhilgy/streaming-data-ingestion/assets/63981603/14040ceb-d0ef-47d1-84bb-a419ea66bbb8">
+
+
 
 
 ```
 Key Technologies: Apache Airflow, Kafka, Spark Streaming, Cassandra, Python
 ```
-
-### Requirements
 
 - Python 3.11
 - Apache Hadoop 3.3.0
