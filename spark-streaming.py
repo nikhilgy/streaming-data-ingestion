@@ -4,11 +4,11 @@ from cassandra.cluster import Cluster, Session
 from cassandra.auth import PlainTextAuthProvider
 from pyspark.sql import SparkSession
 from pyspark.sql.types import StringType, StructField, StructType, ArrayType, LongType
-from pyspark.sql.functions import from_json
+from pyspark.sql.functions import col, from_json
 
 logging.basicConfig(
     filename='streaming.log',  
-    filemode='w',        
+    filemode='a',        
     level=logging.INFO,  
     format='%(asctime)s - %(levelname)s - %(message)s',  
     datefmt='%Y-%m-%d %H:%M:%S'  
@@ -35,7 +35,7 @@ def cassandra_connection(contact_points=['localhost']):
         session = cluster.connect()
         logging.info("Successfully connected to Cassandra cluster.")
     except Exception as e:
-        logging.error(f"Error connecting to Cassandra cluster: {e}")
+        logging.error("Error connecting to Cassandra cluster: {}".format(e))
         if cluster:
             cluster.shutdown()
 
@@ -47,7 +47,7 @@ def cassandra_connection(contact_points=['localhost']):
     
     
 
-def create_keyspace(session, keyspace_name):
+def create_keyspace(session, keyspace_name='profiles'):
     """
     Create a keyspace if it does not already exist.
 
@@ -56,18 +56,18 @@ def create_keyspace(session, keyspace_name):
         keyspace_name (str): The name of the keyspace to create.
     """
     try:
-        keyspace_query = f"""
-        CREATE KEYSPACE IF NOT EXISTS {keyspace_name}
+        keyspace_query = """
+        CREATE KEYSPACE IF NOT EXISTS {}
         WITH replication = {{'class': 'SimpleStrategy', 'replication_factor': 1}}
-        """
+        """.format(keyspace_name)
         session.execute(keyspace_query)
-        logging.info(f"Keyspace '{keyspace_name}' created successfully.")
+        logging.info("Keyspace '{}' created successfully.".format(keyspace_name))
     except Exception as e:
-        logging.error(f"Error creating keyspace '{keyspace_name}': {e}")
+        logging.error("Error creating keyspace '{}': {}".format(keyspace_name, e))
         
 
 
-def create_table(session: Session, keyspace='profiles'):
+def create_table(session, keyspace='profiles'):
     """
     Create the 'users' table in the specified keyspace if it does not already exist.
 
@@ -77,9 +77,9 @@ def create_table(session: Session, keyspace='profiles'):
     """
     try:
         session.set_keyspace(keyspace)
-        logging.info(f"Switched to keyspace '{keyspace}' successfully.")
+        logging.info("Switched to keyspace '{}' successfully.".format(keyspace))
     except Exception as e:
-        logging.error(f"Error setting keyspace '{keyspace}': {e}")
+        logging.error("Error setting keyspace '{}': {}".format(keyspace, e))
         return
 
     create_table_query = """
@@ -98,7 +98,7 @@ def create_table(session: Session, keyspace='profiles'):
         session.execute(create_table_query)
         logging.info("Table 'users' created successfully.")
     except Exception as e:
-        logging.error(f"Error creating table 'users': {e}")
+        logging.error("Error creating table 'users': {}".format(e))
 
 def spark_connection():
     """
@@ -113,15 +113,16 @@ def spark_connection():
             SparkSession
             .builder
             .appName("Streaming from Kafka")
-            .master("local[*]")
+            .master("spark://localhost:7077")
             .config("spark.streaming.stopGracefullyOnShutdown", True)
             .config("spark.sql.shuffle.partitions", 4)
             .config("spark.cassandra.connection.host", "localhost")
             .config(
                 "spark.jars.packages",
-                "com.datastax.spark:spark-cassandra-connector_2.13:3.4.1,"
-                "org.apache.spark:spark-sql-kafka-0-10_2.12:3.4.1"
+                "com.datastax.spark:spark-cassandra-connector_2.13:3.4.1,org.apache.spark:spark-sql-kafka-0-10_2.12:3.4.1"
             )
+            .config("spark.executor.extraLibraryPath", "C:\Hadoop\hadoop-3.3.6\lib\native")
+            .config("spark.driver.extraLibraryPath", "C:\Hadoop\hadoop-3.3.6\lib\native")
             .getOrCreate()
         )
         
@@ -129,7 +130,7 @@ def spark_connection():
         return spark_conn
     
     except Exception as e:
-        logging.error(f"Error connecting to Spark: {e}")
+        logging.error("Error connecting to Spark: {}".format(e))
         return None
     
     
@@ -145,12 +146,15 @@ def read_kafka_topic(spark_conn):
             or None if there's an error.
     """
     try:
+        print("Inside read_kafak_topic function")
         streaming_df = spark_conn.readStream \
             .format("kafka") \
             .option("kafka.bootstrap.servers", "localhost:9092") \
             .option("subscribe", "users_queue") \
             .option("startingOffsets", "earliest") \
             .load()
+            
+        print("Streaming DF: ", streaming_df)
             
         json_schema = StructType([
             StructField('full_name', StringType(), True), \
@@ -161,20 +165,41 @@ def read_kafka_topic(spark_conn):
             StructField('phone', StringType(), True)
         ])    
 
-        # Parse value from binary to string
-        json_df = streaming_df.selectExpr("cast(value as string) as value")
-
-        json_expanded_df = json_df.withColumn("value", from_json(json_df["value"], json_schema)).select("value.*") 
+        """Parse value from binary to string"""
+        parsed_df = streaming_df.selectExpr("CAST(key AS STRING)", "CAST(value AS STRING)") \
+                    .select(from_json(col("value"), json_schema).alias("data")) \
+                    .select("data.*")
         
-        return json_expanded_df
+        return parsed_df
     
     except Exception as e:
-        logging.error(f"Error reading from Kafka topic: {e}")
+        logging.error("Error reading from Kafka topic: {}".format(e))
         return None
+
+
+def writeToCassandra(writeDF, _):
+    """
+    Writes the given DataFrame to a Cassandra database.
+
+    Args:
+        writeDF (DataFrame): The DataFrame to be written to Cassandra.
+        _ (any): A placeholder parameter that is not used in the function.
+
+    The function writes the DataFrame to a Cassandra table named "users" 
+    within the "profiles" keyspace using the Apache Spark Cassandra connector. 
+    The data is appended to the existing table.
+    """
+
+    writeDF.write \
+    .format("org.apache.spark.sql.cassandra")\
+    .mode('append')\
+    .options(table="users", keyspace="profiles")\
+    .save()
     
 if __name__ == "__main__":
     
     cassandra_conn = cassandra_connection()
+    
     spark_conn = spark_connection()
     if cassandra_conn:
         """Create keyspace"""
@@ -185,15 +210,16 @@ if __name__ == "__main__":
         
         """Get data from Kafka"""
         data_df = read_kafka_topic(spark_conn)
+        # print("Data DF: ", data_df)
         
-        """Write stream to cassandra"""
-        streaming_query = (data_df.writeStream.format("org.apache.spark.sql.cassandra")
-                           .option('checkPointLocation', '/tmp/checkpoint')
-                           .option('keyspace', 'profiles')
-                           .option('table', 'users')
-                           .start())
+        """Write data to Cassandra users table"""
+        data_df.writeStream \
+            .option("spark.cassandra.connection.host","localhost:9042")\
+            .foreachBatch(writeToCassandra) \
+            .outputMode("update") \
+            .start()\
+            .awaitTermination()
         
-        streaming_query.awaitTermination()        
         """Shutdown cluster connection"""
         cassandra_conn.cluster.shutdown()
     
