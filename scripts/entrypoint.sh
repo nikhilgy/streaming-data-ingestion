@@ -3,7 +3,8 @@
 set -e
 
 if [ -e "/opt/airflow/requirements.txt" ]; then
-    $(command -v pip) install --user -r requirements.txt
+    python -m pip install --upgrade pip
+    $(command -v pip) install --default-timeout=200 --user -r requirements.txt
 fi
 
 
